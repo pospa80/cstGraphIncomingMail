@@ -37,10 +37,10 @@ import javax.activation.DataHandler;
 import javax.net.ssl.SSLContext;
 
 public class cstIncomingMail implements CustomBusinessConnectTask {
-    private static final String TENANT_ID     = "aaaa";
-    private static final String CLIENT_ID     = "bbbb";
-    private static final String CLIENT_SECRET = "cccc";
-    private static final String MAILBOX       = "dddd";
+    private static final String TENANT_ID     = "e20b56af-d67b-49fa-9edf-3b7631f4f";
+    private static final String CLIENT_ID     = "2b8837f4-1d55-492f-94b7-60eddca5a";
+    private static final String CLIENT_SECRET = "4cI8Q~UQIeb6aNc-fqQ1nQ42ELeT4zlAYGsiv";
+    private static final String MAILBOX       = "tjn.poc@tjene.com";
     private static final String TRIRIGA_DATE_FORMAT = "MM/dd/yyyy HH:mm:ss";
 
     static {
@@ -80,23 +80,10 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
             String accessToken = fetchAccessToken();
             String jsonResponse = fetchUnreadEmails(accessToken);
 
-            List<GraphMessage> emails = parseEmails(jsonResponse);
-            createEmailMessageRecords(emails, tws, accessToken);
 
-//            for (GraphMessage email : emails) {
-//                String emailId = email.id;
-//                String subject = email.subject;
-//                String senderName = email.from.emailAddress.name;
-//                String senderAddress = email.from.emailAddress.address;
-//                String receivedDate = email.receivedDateTime;
-//                String bodyContent = email.body.content;
-//                String bodyType = email.body.contentType;
-//
-//                System.out.println(bodyContent);
-//                markAsRead(accessToken, emailId);
-//
-//                log.info("Marking email {} as read", email.id);
-//            }
+            List<GraphMessage> emails = parseEmails(jsonResponse);
+            populateAttachments(emails, accessToken);
+            createEmailMessageRecords(emails, tws, accessToken);
 
         } catch (Exception e) {
             log.error(e.getMessage());
@@ -106,6 +93,7 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
 
         return false;
     }
+
 
     private String fetchAccessToken() throws Exception {
         String tokenUrl = "https://login.microsoftonline.com/" + TENANT_ID + "/oauth2/v2.0/token";
@@ -137,7 +125,7 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         String mailUrl = "https://graph.microsoft.com/v1.0/users/" + MAILBOX
                 + "/messages"
                 + "?$filter=isRead%20eq%20false"
-                + "&$select=id,subject,body,from,receivedDateTime, sentDateTime, "
+                + "&$select=id,subject,body,from,receivedDateTime,sentDateTime,hasAttachments,toRecipients"
                 + "&$top=50";
 
         URL url = new URL(mailUrl);
@@ -152,31 +140,57 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         return response;
     }
 
-//    private void markAsRead(String accessToken, String messageId) throws Exception {
-//        String patchUrl = "https://graph.microsoft.com/v1.0/users/" + MAILBOX
-//                + "/messages/" + messageId;
-//
-//        String body = "{\"isRead\": true}";
-//
-//        allowPatch();
-//        URL url = new URL(patchUrl);
-//        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-//        conn.setRequestMethod("PATCH");
-//        conn.setRequestProperty("Authorization", "Bearer " + accessToken);
-//        conn.setRequestProperty("Content-Type", "application/json");
-//        conn.setRequestProperty("Accept", "application/json");
-//        conn.setDoOutput(true);
-//
-//        try (OutputStream os = conn.getOutputStream()) {
-//            os.write(body.getBytes("UTF-8"));
-//        }
-//
-//        int responseCode = conn.getResponseCode();
-//        if (responseCode != 200) {
-//            throw new Exception("Failed to mark email as read. Response code: " + responseCode);
-//        }
-//        conn.disconnect();
-//    }
+    private String fetchAttachments(String accessToken, String messageId) throws Exception {
+        log.info("fetching attachments for {}: ", messageId);
+        String attachmentsUrl = "https://graph.microsoft.com/v1.0/users/" + MAILBOX
+                + "/messages/" + messageId
+                + "/attachments";
+
+        URL url = new URL(attachmentsUrl);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Accept", "application/json");
+
+        String response = readResponse(conn);
+        conn.disconnect();
+        return response;
+    }
+
+    public List<GraphEmailAttachment> parseAttachments(String jsonResponse) {
+        log.info("fff");
+        Gson gson = new Gson();
+        GraphAttachmentResponse response = gson.fromJson(jsonResponse, GraphAttachmentResponse.class);
+        log.info("ggg");
+        return response.value;
+    }
+
+    /**
+     * For every message that has attachments, fetch them from Graph and
+     * populate msg.attachments in place.
+     */
+    private void populateAttachments(List<GraphMessage> messages, String accessToken) {
+        log.info("populateAttachments");
+        for (GraphMessage msg : messages) {
+            log.info("ccc {}", msg.id);
+            if (!msg.hasAttachments) {
+                log.info("dddd");
+                continue;
+            }
+            try {
+                String attachmentJson = fetchAttachments(accessToken, msg.id);
+                log.info("eeee");
+                List<GraphEmailAttachment> attachments = parseAttachments(attachmentJson);
+                msg.attachments = attachments;
+                log.info("Fetched " + (attachments != null ? attachments.size() : 0)
+                        + " attachment(s) for message " + msg.id);
+            } catch (Exception e) {
+                log.error("Failed to fetch attachments for message " + msg.id, e);
+            }
+        }
+        log.info("end populateAttachments");
+    }
 
     private void markAsRead(String accessToken, String messageId) throws Exception {
         String patchUrl = "https://graph.microsoft.com/v1.0/users/" + MAILBOX
@@ -266,26 +280,7 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         return response.value;
     }
 
-    public boolean CreateEmailMessage(GraphMessage email, String accessToken) {
-        try {
-            String emailId = email.id;
-            String subject = email.subject;
-            String receivedDate = email.receivedDateTime;
-            String bodyContent = email.body.content;
-            String bodyType = email.body.contentType;
-
-
-            markAsRead(accessToken, emailId);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-
-        }
-
-        log.info("Marking email {} as read", email.id);
-        return true;
-    }
-
-    private void createEmailMessageRecords(List<GraphMessage> messages, TririgaWS tws, String accessToken) {
+   private void createEmailMessageRecords(List<GraphMessage> messages, TririgaWS tws, String accessToken) {
         for (GraphMessage msg : messages) {
             try {
                 IntegrationSection section = new IntegrationSection();
@@ -314,8 +309,9 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
 
                 // Now upload attachments, if any, against the newly created record
 
-
+                log.info("aaaa");
                 if (msg.hasAttachments && msg.attachments != null) {
+                    log.info("bbbb");
                     for (GraphEmailAttachment attachment : msg.attachments) {
                         log.info("calling uploadAttachement for : " + attachment.name);
                         uploadAttachment(attachment, newRecordId, tws);
@@ -323,9 +319,49 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
                     }
                 }
 
+                for (GraphToRecipient recipient : msg.getToRecipients) {
+                    uploadToRecipient(recipient, newRecordId, tws);
+                }
+                markAsRead(accessToken, msg.id);
             } catch (Exception e) {
                 log.error("Failed to create EmailMessage record for subject: " + msg.subject, e);
             }
+        }
+    }
+
+    private void uploadToRecipient(GraphToRecipient recipient, long recordId, TririgaWS tws) {
+        try {
+            IntegrationSection section = new IntegrationSection();
+            section.setName("EmailAttachment"); // TODO: confirm exact section name
+
+            populateFieldsFromGraphAddress(recipient, section);
+
+            IntegrationRecord newRecord = new IntegrationRecord();
+            newRecord.setActionName("CREATE"); // TODO: confirm
+            newRecord.setSections(new IntegrationSection[]{section});
+            newRecord.setId(-1);
+            newRecord.setGuiId(10014745);
+            newRecord.setObjectTypeId(10009440);
+            newRecord.setObjectTypeName("EmailAddress");
+            newRecord.setModuleId(17);
+
+            log.info("Saving EmailAddress record for file: " + recipient.emailAddress);
+
+            ResponseHelperHeader rhh = tws.saveRecord(new IntegrationRecord[]{newRecord});
+
+            long newRecordId = extractRecordId(rhh); // TODO: confirm how to pull ID off rhh
+
+            Association association = new Association();
+            association.setAssociatedRecordId(newRecordId);
+            association.setRecordId(recordId);
+            association.setAssociationName("Email To");
+
+            tws.associateRecords(new Association[] {association});
+
+            log.info("");
+
+        } catch (Exception e) {
+            log.error("Failed to create RecipientToAddress record for: " + recipient.emailAddress, e);
         }
     }
 
@@ -360,6 +396,8 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         try {
             IntegrationSection section = new IntegrationSection();
             section.setName("EmailAttachment"); // TODO: confirm exact section name
+
+            populateFieldsFromGraphAttachment(attachment, section);
 
             IntegrationRecord newRecord = new IntegrationRecord();
             newRecord.setActionName("CREATE"); // TODO: confirm
@@ -404,9 +442,20 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         List<IntegrationField> fields = new ArrayList<>();
 
         fields.add(buildField("Subject", msg.subject));
-        //fields.add(buildField("SentDate", formatDate(msg.receivedDateTime)));
-        //fields.add(buildField("ReceivedDate", formatDate(msg.receivedDateTime)));
+        section.setFields(fields.toArray(new IntegrationField[0]));
+    }
 
+    private void populateFieldsFromGraphAttachment(GraphEmailAttachment attachment, IntegrationSection section) {
+        List<IntegrationField> fields = new ArrayList<>();
+
+        fields.add(buildField("FileName", attachment.name));
+        section.setFields(fields.toArray(new IntegrationField[0]));
+    }
+
+    private void populateFieldsFromGraphAddress(GraphEmailAddress address, IntegrationSection section) {
+        List<IntegrationField> fields = new ArrayList<>();
+
+        fields.add(buildField("FileName", address.name));
         section.setFields(fields.toArray(new IntegrationField[0]));
     }
 
