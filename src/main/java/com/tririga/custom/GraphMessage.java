@@ -8,8 +8,9 @@ public class GraphMessage {
     public String receivedDateTime;
     public String sentDateTime;
     public GraphBody body;
-    public GraphFrom from;
-    public List<GraphToRecipient> getToRecipients;
+    public GraphPerson from;
+    public List<GraphPerson> toRecipients;
     public boolean hasAttachments;
     public List<GraphEmailAttachment> attachments;
+
 }

@@ -1,6 +1,6 @@
 package com.tririga.custom;
 
-public class GraphToRecipient {
+public class GraphPerson {
     public GraphEmailAddress emailAddress;
 
 }

@@ -37,11 +37,7 @@ import javax.activation.DataHandler;
 import javax.net.ssl.SSLContext;
 
 public class cstIncomingMail implements CustomBusinessConnectTask {
-    private static final String TENANT_ID     = "e20b56af-d67b-49fa-9edf-3b7631f4f";
-    private static final String CLIENT_ID     = "2b8837f4-1d55-492f-94b7-60eddca5a";
-    private static final String CLIENT_SECRET = "4cI8Q~UQIeb6aNc-fqQ1nQ42ELeT4zlAYGsiv";
-    private static final String MAILBOX       = "tjn.poc@tjene.com";
-    private static final String TRIRIGA_DATE_FORMAT = "MM/dd/yyyy HH:mm:ss";
+
 
     static {
         Configurator.initialize(null, String.valueOf(cstIncomingMail.class.getClassLoader().getResource("custom-log4j2.xml")));
@@ -125,8 +121,7 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         String mailUrl = "https://graph.microsoft.com/v1.0/users/" + MAILBOX
                 + "/messages"
                 + "?$filter=isRead%20eq%20false"
-                + "&$select=id,subject,body,from,receivedDateTime,sentDateTime,hasAttachments,toRecipients"
-                + "&$top=50";
+                + "&$select=id,subject,body,from,receivedDateTime,sentDateTime,hasAttachments,toRecipients";
 
         URL url = new URL(mailUrl);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -284,12 +279,14 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         for (GraphMessage msg : messages) {
             try {
                 IntegrationSection section = new IntegrationSection();
-                section.setName("General Info"); // TODO: confirm exact section name
+                section.setName("General Info");
 
                 populateFieldsFromGraphMessage(msg, section);
 
+
+
                 IntegrationRecord newRecord = new IntegrationRecord();
-                newRecord.setActionName("CREATE"); // TODO: confirm
+                newRecord.setActionName("CREATE");
                 newRecord.setSections(new IntegrationSection[]{section});
                 newRecord.setId(-1);
                 newRecord.setGuiId(10014746);
@@ -307,45 +304,47 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
                 //    continue;
                 //}
 
-                // Now upload attachments, if any, against the newly created record
 
-                log.info("aaaa");
                 if (msg.hasAttachments && msg.attachments != null) {
-                    log.info("bbbb");
                     for (GraphEmailAttachment attachment : msg.attachments) {
-                        log.info("calling uploadAttachement for : " + attachment.name);
+                        log.info("calling upload Attachment for : {}", attachment.name);
                         uploadAttachment(attachment, newRecordId, tws);
 
                     }
                 }
 
-                for (GraphToRecipient recipient : msg.getToRecipients) {
+                for (GraphPerson recipient : msg.toRecipients) {
                     uploadToRecipient(recipient, newRecordId, tws);
                 }
+
+                if(msg.from != null) {
+                    uploadFrom(msg.from, newRecordId, tws);
+                }
+
                 markAsRead(accessToken, msg.id);
             } catch (Exception e) {
-                log.error("Failed to create EmailMessage record for subject: " + msg.subject, e);
+                log.error("Failed to create EmailMessage record for subject: {}", msg.subject, e);
             }
         }
     }
 
-    private void uploadToRecipient(GraphToRecipient recipient, long recordId, TririgaWS tws) {
+    private void uploadToRecipient(GraphPerson recipient, long recordId, TririgaWS tws) {
         try {
             IntegrationSection section = new IntegrationSection();
-            section.setName("EmailAttachment"); // TODO: confirm exact section name
+            section.setName("EmailAddress");
 
             populateFieldsFromGraphAddress(recipient, section);
 
             IntegrationRecord newRecord = new IntegrationRecord();
-            newRecord.setActionName("CREATE"); // TODO: confirm
+            newRecord.setActionName("CREATE");
             newRecord.setSections(new IntegrationSection[]{section});
             newRecord.setId(-1);
-            newRecord.setGuiId(10014745);
-            newRecord.setObjectTypeId(10009440);
+            newRecord.setGuiId(10014744);
+            newRecord.setObjectTypeId(10009441);
             newRecord.setObjectTypeName("EmailAddress");
             newRecord.setModuleId(17);
 
-            log.info("Saving EmailAddress record for file: " + recipient.emailAddress);
+            log.info("Saving EmailAddress record for file: {}", recipient.emailAddress);
 
             ResponseHelperHeader rhh = tws.saveRecord(new IntegrationRecord[]{newRecord});
 
@@ -354,14 +353,50 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
             Association association = new Association();
             association.setAssociatedRecordId(newRecordId);
             association.setRecordId(recordId);
-            association.setAssociationName("Email To");
+            association.setAssociationName("Email To Address");
 
             tws.associateRecords(new Association[] {association});
 
             log.info("");
 
         } catch (Exception e) {
-            log.error("Failed to create RecipientToAddress record for: " + recipient.emailAddress, e);
+            log.error("Failed to create RecipientToAddress record for: {}", recipient.emailAddress, e);
+        }
+    }
+
+    private void uploadFrom(GraphPerson from, long recordId, TririgaWS tws) {
+        try {
+            IntegrationSection section = new IntegrationSection();
+            section.setName("EmailAddress");
+
+            populateFieldsFromGraphAddress(from, section);
+
+            IntegrationRecord newRecord = new IntegrationRecord();
+            newRecord.setActionName("CREATE");
+            newRecord.setSections(new IntegrationSection[]{section});
+            newRecord.setId(-1);
+            newRecord.setGuiId(10014744);
+            newRecord.setObjectTypeId(10009441);
+            newRecord.setObjectTypeName("EmailAddress");
+            newRecord.setModuleId(17);
+
+            log.info("Saving from EmailAddress record for file: {}", from.emailAddress);
+
+            ResponseHelperHeader rhh = tws.saveRecord(new IntegrationRecord[]{newRecord});
+
+            long newRecordId = extractRecordId(rhh); // TODO: confirm how to pull ID off rhh
+
+            Association association = new Association();
+            association.setAssociatedRecordId(newRecordId);
+            association.setRecordId(recordId);
+            association.setAssociationName("Email From Address");
+
+            tws.associateRecords(new Association[] {association});
+
+            log.info("");
+
+        } catch (Exception e) {
+            log.error("Failed to create RecipientToAddress record for: {}", from.emailAddress, e);
         }
     }
 
@@ -420,15 +455,21 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
             Content content = new Content();
             content.setContent(dh);
             content.setRecordId(newRecordId);
+            content.setFileName(attachment.name);
+            content.setFieldName("Content");
+
 
             tws.upload(content);
 
+            log.info("creating association between {} and {}", recordId, newRecordId);
             Association association = new Association();
+
             association.setAssociatedRecordId(newRecordId);
             association.setRecordId(recordId);
             association.setAssociationName("Email Attachment");
+            association.setReverseAssociationName("Email Attachment");
 
-            tws.associateRecords(new Association[] {association});
+            tws.associateRecords(new Association[]{association});
 
             log.info("Uploaded attachment '" + attachment.name + "' (" + bytes.length + " bytes) to record " + recordId);
 
@@ -442,6 +483,12 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         List<IntegrationField> fields = new ArrayList<>();
 
         fields.add(buildField("Subject", msg.subject));
+        fields.add(buildField("Body", msg.body.content));
+        fields.add(buildField("sentDate", formatDate(msg.sentDateTime)));
+        fields.add(buildField("ReceivedDate", formatDate(msg.receivedDateTime)));
+
+        log.info("setting sentDate to {}", msg.sentDateTime);
+        log.info("setting receivedDate to {}", msg.receivedDateTime);
         section.setFields(fields.toArray(new IntegrationField[0]));
     }
 
@@ -452,10 +499,11 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         section.setFields(fields.toArray(new IntegrationField[0]));
     }
 
-    private void populateFieldsFromGraphAddress(GraphEmailAddress address, IntegrationSection section) {
+    private void populateFieldsFromGraphAddress(GraphPerson recipient, IntegrationSection section) {
         List<IntegrationField> fields = new ArrayList<>();
 
-        fields.add(buildField("FileName", address.name));
+        fields.add(buildField("PersonalName", recipient.emailAddress.name));
+        fields.add(buildField("Address", recipient.emailAddress.address));
         section.setFields(fields.toArray(new IntegrationField[0]));
     }
 
