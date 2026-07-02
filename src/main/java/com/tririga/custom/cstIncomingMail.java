@@ -1,8 +1,11 @@
 package com.tririga.custom;
 
 import com.sun.istack.ByteArrayDataSource;
-import com.tririga.pub.workflow.CustomBusinessConnectTask;
-import com.tririga.pub.workflow.CustomParamTaskResultImpl;
+import com.tririga.platform.oauth.OAuthService;
+import com.tririga.platform.oauth.brb.MSOAuth;
+import com.tririga.platform.oauth.model.OAuthToken;
+import com.tririga.platform.util.locator.Locator;
+import com.tririga.pub.workflow.*;
 import com.tririga.pub.workflow.Record;
 import com.tririga.ws.TririgaWS;
 import com.tririga.ws.dto.*;
@@ -18,10 +21,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 
 import com.google.gson.Gson;
 
@@ -36,8 +36,13 @@ import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import javax.activation.DataHandler;
 import javax.net.ssl.SSLContext;
 
-public class cstIncomingMail implements CustomBusinessConnectTask {
+public class cstIncomingMail implements CustomParamBusinessConnectTask {
 
+    private String MAILBOX;
+    private String TENANT_ID;
+    private String CLIENT_SECRET;
+    private String CLIENT_ID;
+    private static final String TRIRIGA_DATE_FORMAT = "MM/dd/yyyy HH:mm:ss";
 
     static {
         Configurator.initialize(null, String.valueOf(cstIncomingMail.class.getClassLoader().getResource("custom-log4j2.xml")));
@@ -48,48 +53,69 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
     private static final org.apache.logging.log4j.Logger log = LogManager.getLogger(cstIncomingMail.class);
 
     @Override
-    public boolean execute(TririgaWS tws, long l, Record[] records) {
+    public CustomParamTaskResult execute(TririgaWS tws, Map parameters, long l, Record[] records) {
         CustomParamTaskResultImpl result = new CustomParamTaskResultImpl();
-        String output = "";
-        //Gathering of info from Tririga
-        com.tririga.ws.dto.Record[] recordHeaders = null;
+        String subscriptionId = "";
+
+
         try {
             tws.register(l);
-            int count = records.length;
-            long[] recordIds = new long[count];
-            for (int i = 0; i < count; i++) {
-                recordIds[i] = records[i].getId();
-                log.info("Record " + i + ": " + records[i].getId());
-            }
-            recordHeaders = tws.getRecordDataHeaders(recordIds);
+            WFVariable firstValue = (WFVariable) parameters.values().iterator().next();
+            WFStepInfo stepInfo = (WFStepInfo) firstValue.getValue();
+            subscriptionId = String.valueOf(stepInfo.getResultRecordId());
         } catch (Exception ex) {
-            output = ex.getMessage();
             log.error(ex.getMessage());
-            return false;
+            return null;
         }
 
-        int recordCount = 0;
-        boolean succeeded = true;
-        StringBuilder logTimes = new StringBuilder();
+        // Retrieve Exchange Mailbox
+        DisplayLabel displayLabel = new DisplayLabel();
+        displayLabel.setFieldName("triResourcePathTX");
+        displayLabel.setSectionName("General");
+
+        Filter filter = new Filter();
+        filter.setDataType(Filter.DT_STRING);
+        filter.setFieldName("triRecordIdSY");
+        filter.setValue(subscriptionId);
+        filter.setOperator(Filter.OP_EQUALS);
 
         try {
-            String accessToken = fetchAccessToken();
+            QueryResult query = tws.runDynamicQuery("", "System", new String[]{"triExchangeSubscription"}, null,
+                    null, null, 2, new DisplayLabel[]{displayLabel}, null, null, new Filter[] {filter}, null, 1, 1);
+            QueryResponseHelper[] qHelpers = query.getQueryResponseHelpers();
+
+            for (QueryResponseHelper qrh : qHelpers) {
+                QueryResponseColumn[] queryResponseColumns = qrh.getQueryResponseColumns();
+                for (QueryResponseColumn qrc : queryResponseColumns) {
+                    if (qrc.getValue() != null) {
+                        MAILBOX = qrc.getValue().split("/")[2];
+                        log.info("Mailbox: {} ", MAILBOX);
+                    }
+                }
+            }
+
+            OAuthService oAuthService = (OAuthService) Locator.getInstance().locate(OAuthService.class);
+            MSOAuth profile = oAuthService.getOAuthProfile("Graph Mail", false);
+            OAuthToken token = oAuthService.requestToken(profile);
+            String accessToken = token.getAccessToken();
+            log.info("ACCESS TOKEN: {}", accessToken);
+
+            //String accessToken = fetchAccessToken();
             String jsonResponse = fetchUnreadEmails(accessToken);
 
-
             List<GraphMessage> emails = parseEmails(jsonResponse);
-            populateAttachments(emails, accessToken);
-            createEmailMessageRecords(emails, tws, accessToken);
+            if (emails != null) {
+                populateAttachments(emails, accessToken);
+                createEmailMessageRecords(emails, tws, accessToken);
+            }
+
 
         } catch (Exception e) {
-            log.error(e.getMessage());
+            log.error("Error: {}", e.getMessage());
             throw new RuntimeException(e);
         }
-
-
-        return false;
+        return null;
     }
-
 
     private String fetchAccessToken() throws Exception {
         String tokenUrl = "https://login.microsoftonline.com/" + TENANT_ID + "/oauth2/v2.0/token";
@@ -166,7 +192,6 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
      * populate msg.attachments in place.
      */
     private void populateAttachments(List<GraphMessage> messages, String accessToken) {
-        log.info("populateAttachments");
         for (GraphMessage msg : messages) {
             log.info("ccc {}", msg.id);
             if (!msg.hasAttachments) {
@@ -272,6 +297,12 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
     public List<GraphMessage> parseEmails(String jsonResponse) {
         Gson gson = new Gson();
         GraphMessageResponse response = gson.fromJson(jsonResponse, GraphMessageResponse.class);
+        if (response.value != null) {
+            log.info("email parsed");
+        } else {
+            log.info("email parse failed");
+            log.info("jsonReponse: {}", jsonResponse);
+        }
         return response.value;
     }
 

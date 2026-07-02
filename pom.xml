@@ -27,6 +27,13 @@
         </dependency>
         <dependency>
             <groupId>com.tririga</groupId>
+            <artifactId>IBM-Tririga</artifactId>
+            <version>4.5</version>
+            <type>jar</type>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tririga</groupId>
             <artifactId>TririgaCustomTask</artifactId>
             <version>1.2</version>
             <type>jar</type>
