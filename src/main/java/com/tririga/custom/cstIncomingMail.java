@@ -384,7 +384,7 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
 
             ResponseHelperHeader rhh = tws.saveRecord(new IntegrationRecord[]{newRecord});
 
-            long newRecordId = extractRecordId(rhh); // TODO: confirm how to pull ID off rhh
+            long newRecordId = extractRecordId(rhh);
 
             Association association = new Association();
             association.setAssociatedRecordId(newRecordId);
@@ -416,7 +416,7 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
 
             ResponseHelperHeader rhh = tws.saveRecord(new IntegrationRecord[]{newRecord});
 
-            long newRecordId = extractRecordId(rhh); // TODO: confirm how to pull ID off rhh
+            long newRecordId = extractRecordId(rhh);
 
             Association association = new Association();
             association.setAssociatedRecordId(newRecordId);
@@ -460,12 +460,12 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
     private void uploadAttachment(GraphEmailAttachment attachment, long recordId, TririgaWS tws) {
         try {
             IntegrationSection section = new IntegrationSection();
-            section.setName("EmailAttachment"); // TODO: confirm exact section name
+            section.setName("EmailAttachment");
 
             populateFieldsFromGraphAttachment(attachment, section);
 
             IntegrationRecord newRecord = new IntegrationRecord();
-            newRecord.setActionName("CREATE"); // TODO: confirm
+            newRecord.setActionName("CREATE");
             newRecord.setSections(new IntegrationSection[]{section});
             newRecord.setId(-1);
             newRecord.setGuiId(10014745);
@@ -475,7 +475,7 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
 
             ResponseHelperHeader rhh = tws.saveRecord(new IntegrationRecord[]{newRecord});
 
-            long newRecordId = extractRecordId(rhh); // TODO: confirm how to pull ID off rhh
+            long newRecordId = extractRecordId(rhh);
 
             byte[] bytes = Base64.getDecoder().decode(attachment.contentBytes);
 
@@ -537,7 +537,6 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
     }
 
     private String formatDate(Object dateValue) {
-        // TODO: confirm exact TRIRIGA date string format expected, e.g. "MM/dd/yyyy HH:mm:ss"
         if (dateValue == null) {
             return "";
         }
