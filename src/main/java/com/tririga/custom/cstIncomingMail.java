@@ -40,12 +40,13 @@ import javax.activation.DataHandler;
 import javax.net.ssl.SSLContext;
 import javax.xml.datatype.DatatypeFactory;
 
-public class cstIncomingMail implements CustomParamBusinessConnectTask {
+public class cstIncomingMail implements CustomBusinessConnectTask {
     private String MAILBOX;
     private String TENANT_ID;
     private String CLIENT_SECRET;
     private String CLIENT_ID;
     private static final String TRIRIGA_DATE_FORMAT = "MM/dd/yyyy HH:mm:ss";
+    private long MESSAGE_ID;
 
     static {
         Configurator.initialize(null, String.valueOf(cstIncomingMail.class.getClassLoader().getResource("custom-log4j2.xml")));
@@ -56,19 +57,21 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
     private static final Logger log = LogManager.getLogger(cstIncomingMail.class);
 
     @Override
-    public CustomParamTaskResult execute(TririgaWS tws, Map parameters, long l, Record[] records) {
-        CustomParamTaskResultImpl result = new CustomParamTaskResultImpl();
+    public boolean execute(TririgaWS tws, long l, Record[] records) {
         String subscriptionId = "";
-
 
         try {
             tws.register(l);
-            WFVariable firstValue = (WFVariable) parameters.values().iterator().next();
-            WFStepInfo stepInfo = (WFStepInfo) firstValue.getValue();
-            subscriptionId = String.valueOf(stepInfo.getResultRecordId());
+            for (Record record : records) {
+                subscriptionId = String.valueOf(record.getId());
+            }
+//            recordHeaders = tws.getRecordDataHeaders(recordIds);
+//            WFVariable firstValue = (WFVariable) parameters.values().iterator().next();
+//            WFStepInfo stepInfo = (WFStepInfo) firstValue.getValue();
+//            subscriptionId = String.valueOf(stepInfo.getResultRecordId());
         } catch (Exception ex) {
             log.error(ex.getMessage());
-            return null;
+            return false;
         }
 
         // Retrieve Exchange Mailbox
@@ -97,7 +100,7 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
                 }
             }
 
-            // Retrieve OAuth Settngs
+            // Retrieve OAuth Settings
             DisplayLabel displayRecord = new DisplayLabel();
             displayRecord.setFieldName("triNameTX");
             displayRecord.setSectionName("General");
@@ -126,7 +129,7 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
 
             if (oauthName != null) {
                 OAuthService oAuthService = (OAuthService) Locator.getInstance().locate(OAuthService.class);
-                MSOAuth profile = oAuthService.getOAuthProfile("Graph Mail", false);
+                MSOAuth profile = oAuthService.getOAuthProfile(oauthName, false);
                 OAuthToken token = oAuthService.requestToken(profile);
 
                 String accessToken = token.getAccessToken();
@@ -145,7 +148,7 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
             log.error("Error: {}", e.getMessage());
             throw new RuntimeException(e);
         }
-        return null;
+        return true;
     }
 
     private String fetchAccessToken() throws Exception {
@@ -221,9 +224,6 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
      */
     private void populateAttachments(List<GraphMessage> messages, String accessToken) {
         for (GraphMessage msg : messages) {
-            if (!msg.hasAttachments) {
-                continue;
-            }
             try {
                 String attachmentJson = fetchAttachments(accessToken, msg.id);
                 List<GraphEmailAttachment> attachments = parseAttachments(attachmentJson);
@@ -343,7 +343,7 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
 
                 long newRecordId = extractRecordId(rhh);
 
-                if (msg.hasAttachments && msg.attachments != null) {
+                if (msg.attachments != null) {
                     for (GraphEmailAttachment attachment : msg.attachments) {
                         uploadAttachment(attachment, newRecordId, tws);
 
@@ -359,7 +359,13 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
                 }
 
                 markAsRead(accessToken, msg.id);
-                log.info("Created Email Message for {}: ", msg.subject);
+
+                TriggerActions triggerActions = new TriggerActions();
+                triggerActions.setActionName("triProcessInbound");
+                triggerActions.setRecordId(newRecordId);
+                tws.triggerActions(new TriggerActions[]{triggerActions});
+
+                log.info("Created Email Message for {}: ", msg.id);
             } catch (Exception e) {
                 log.error("Failed to create EmailMessage record for subject: {}", msg.subject, e);
             }
@@ -557,7 +563,6 @@ public class cstIncomingMail implements CustomParamBusinessConnectTask {
             return "";
         }
     }
-
 }
 
 
