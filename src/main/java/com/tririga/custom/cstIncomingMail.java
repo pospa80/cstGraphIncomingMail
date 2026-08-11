@@ -52,8 +52,6 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
         Configurator.initialize(null, String.valueOf(cstIncomingMail.class.getClassLoader().getResource("custom-log4j2.xml")));
     }
 
-    public static int BUFFER_SIZE = 102400;
-
     private static final Logger log = LogManager.getLogger(cstIncomingMail.class);
 
     @Override
@@ -125,8 +123,6 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
                 }
             }
 
-
-
             if (oauthName != null) {
                 OAuthService oAuthService = (OAuthService) Locator.getInstance().locate(OAuthService.class);
                 MSOAuth profile = oAuthService.getOAuthProfile(oauthName, false);
@@ -136,7 +132,6 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
 
                 //String accessToken = fetchAccessToken();
                 String jsonResponse = fetchUnreadEmails(accessToken);
-
                 List<GraphMessage> emails = parseEmails(jsonResponse);
                 if (emails != null) {
                     populateAttachments(emails, accessToken);
@@ -551,17 +546,34 @@ public class cstIncomingMail implements CustomBusinessConnectTask {
             if (dateValue instanceof Date) {
                 parsed = (Date) dateValue;
             } else {
-                // Graph returns ISO 8601 strings like "2026-06-22T14:30:00Z"
                 parsed = DatatypeFactory.newInstance()
                         .newXMLGregorianCalendar(String.valueOf(dateValue))
                         .toGregorianCalendar()
                         .getTime();
             }
-            return new SimpleDateFormat(TRIRIGA_DATE_FORMAT).format(parsed);
+            long millis = parsed.getTime();
+            return String.valueOf(millis);
         } catch (Exception e) {
             log.warn("Failed to format date value: " + dateValue, e);
             return "";
         }
+//        try {
+//            Date parsed;
+//            if (dateValue instanceof Date) {
+//                parsed = (Date) dateValue;
+//            } else {
+//                // Graph returns ISO 8601 strings like "2026-06-22T14:30:00Z"
+//                parsed = DatatypeFactory.newInstance()
+//                        .newXMLGregorianCalendar(String.valueOf(dateValue))
+//                        .toGregorianCalendar()
+//                        .getTime();
+//            }
+//            log.info("Date: {}", new SimpleDateFormat(TRIRIGA_DATE_FORMAT).format(parsed));
+//            return new SimpleDateFormat(TRIRIGA_DATE_FORMAT).format(parsed);
+//        } catch (Exception e) {
+//            log.warn("Failed to format date value: " + dateValue, e);
+//            return "";
+//        }
     }
 }
 
